@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>포트폴리오 & 금융 대시보드</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body class="bg-gradient-to-br from-sky-400 via-blue-300 to-cyan-400 min-h-screen">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // 금융 상품 설정
+        const FINANCIAL_SYMBOLS = [
+            { symbol: 'BTC-USD', name: '비트코인', icon: '₿' },
+            { symbol: '^IXIC', name: '나스닥', icon: '📊' },
+            { symbol: '^GSPC', name: 'S&P 500', icon: '📈' },
+            { symbol: '^N225', name: '니케이225', icon: '🗾' },
+            { symbol: '^HSI', name: '항셍지수', icon: '🇭🇰' },
+            { symbol: '^KS11', name: '코스피', icon: '🇰🇷' },
+            { symbol: '^KQ11', name: '코스닥', icon: '📱' },
+            { symbol: 'GC=F', name: '금', icon: '🥇' },
+            { symbol: 'CL=F', name: 'WTI 원유', icon: '🛢️' },
+            { symbol: 'NG=F', name: '천연가스', icon: '🔥' },
+            { symbol: '^STOXX50E', name: '유로스탁스50', icon: '🇪🇺' }
+        ];
+
+        // Yahoo Finance API Proxy (CORS 우회용)
+        const fetchQuote = async (symbol) => {
+            try {
+                // Yahoo Finance query API 사용
+                const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=1d`;
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                if (data.chart.result && data.chart.result[0]) {
+                    const result = data.chart.result[0];
+                    const meta = result.meta;
+                    const quote = result.indicators.quote[0];
+                    
+                    return {
+                        symbol: symbol,
+                        price: meta.regularMarketPrice || quote.close[quote.close.length - 1],
+                        previousClose: meta.previousClose || meta.chartPreviousClose,
+                        change: meta.regularMarketPrice - meta.previousClose,
+                        changePercent: ((meta.regularMarketPrice - meta.previousClose) / meta.previousClose) * 100,
+                        currency: meta.currency
+                    };
+                }
+                return null;
+            } catch (error) {
+                console.error(`Error fetching ${symbol}:`, error);
+                return null;
+            }
+        };
+
+        function PortfolioDashboard() {
+            const [quotes, setQuotes] = useState({});
+            const [loading, setLoading] = useState(true);
+            const [lastUpdate, setLastUpdate] = useState(new Date());
+
+            // 링크 정보
+            const links = [
+                {
+                    name: '티스토리 블로그',
+                    url: 'https://hanglestocks.tistory.com',
+                    icon: 'fa-t',
+                    customIcon: true,
+                    color: 'from-orange-500 to-red-500'
+                },
+                {
+                    name: 'Threads',
+                    url: 'https://www.threads.com/@sgfindreamer?hl=ko',
+                    icon: 'fa-at',
+                    customIcon: false,
+                    color: 'from-purple-500 to-pink-500'
+                },
+                {
+                    name: 'LinkedIn',
+                    url: 'https://www.linkedin.com/in/heyjinwoo',
+                    icon: 'fa-linkedin',
+                    customIcon: false,
+                    color: 'from-blue-600 to-blue-700'
+                },
+                {
+                    name: 'GitHub',
+                    url: 'https://github.com/superjin1218',
+                    icon: 'fa-github',
+                    customIcon: false,
+                    color: 'from-gray-700 to-gray-900'
+                }
+            ];
+
+            const fetchAllQuotes = async () => {
+                setLoading(true);
+                const newQuotes = {};
+                
+                for (const item of FINANCIAL_SYMBOLS) {
+                    const quote = await fetchQuote(item.symbol);
+                    if (quote) {
+                        newQuotes[item.symbol] = quote;
+                    }
+                    // API 호출 제한을 피하기 위한 딜레이
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                }
+                
+                setQuotes(newQuotes);
+                setLoading(false);
+                setLastUpdate(new Date());
+            };
+
+            useEffect(() => {
+                fetchAllQuotes();
+                
+                // 5분마다 자동 새로고침
+                const interval = setInterval(fetchAllQuotes, 300000);
+                
+                return () => clearInterval(interval);
+            }, []);
+
+            const formatPrice = (price, currency) => {
+                if (!price) return 'N/A';
+                return new Intl.NumberFormat('ko-KR', {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2
+                }).format(price);
+            };
+
+            const formatPercent = (percent) => {
+                if (!percent) return 'N/A';
+                return percent.toFixed(2);
+            };
+
+            return (
+                <div className="min-h-screen p-4 md:p-8">
+                    <div className="max-w-7xl mx-auto">
+                        {/* 헤더 */}
+                        <div className="text-center mb-12">
+                            <h1 className="text-5xl font-bold text-gray-800 mb-4 drop-shadow-lg">
+                                포트폴리오 & 금융 대시보드
+                            </h1>
+                            <p className="text-gray-700 text-lg font-medium">실시간 글로벌 시장 데이터</p>
+                        </div>
+
+                        {/* 소셜 링크 섹션 */}
+                        <div className="mb-12">
+                            <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center">
+                                <i className="fas fa-link mr-3"></i>
+                                내 링크
+                            </h2>
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                                {links.map((link, index) => (
+                                    <a
+                                        key={index}
+                                        href={link.url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className={`bg-gradient-to-br ${link.color} p-6 rounded-xl shadow-lg hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-1`}
+                                    >
+                                        <div className="flex items-center space-x-4">
+                                            {link.customIcon ? (
+                                                <div className="text-3xl text-white font-black" style={{fontFamily: 'Arial, sans-serif'}}>
+                                                    tistory
+                                                </div>
+                                            ) : (
+                                                <i className={`fab ${link.icon} text-3xl text-white`}></i>
+                                            )}
+                                            <div>
+                                                <h3 className="text-white font-bold text-lg">{link.name}</h3>
+                                                <p className="text-white text-sm opacity-80">방문하기</p>
+                                            </div>
+                                        </div>
+                                    </a>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* 실시간 금융 데이터 섹션 */}
+                        <div className="mb-12">
+                            <div className="flex justify-between items-center mb-6">
+                                <h2 className="text-2xl font-bold text-gray-800 flex items-center">
+                                    <i className="fas fa-chart-line mr-3"></i>
+                                    실시간 시장 데이터
+                                </h2>
+                                <div className="flex items-center space-x-4">
+                                    <span className="text-gray-700 text-sm font-medium">
+                                        마지막 업데이트: {lastUpdate.toLocaleTimeString('ko-KR')}
+                                    </span>
+                                    <button
+                                        onClick={fetchAllQuotes}
+                                        disabled={loading}
+                                        className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2 shadow-lg"
+                                    >
+                                        <i className={`fas fa-sync-alt ${loading ? 'animate-spin' : ''}`}></i>
+                                        <span>{loading ? '로딩 중...' : '새로고침'}</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                                {FINANCIAL_SYMBOLS.map((item) => {
+                                    const quote = quotes[item.symbol];
+                                    const isPositive = quote?.change >= 0;
+
+                                    return (
+                                        <div
+                                            key={item.symbol}
+                                            className="bg-white rounded-xl p-6 shadow-xl hover:shadow-2xl transition-all duration-300 border border-gray-200"
+                                        >
+                                            <div className="flex items-center justify-between mb-4">
+                                                <span className="text-3xl">{item.icon}</span>
+                                                {loading && !quote ? (
+                                                    <i className="fas fa-spinner fa-spin text-gray-400"></i>
+                                                ) : (
+                                                    <i className={`fas fa-arrow-${isPositive ? 'up' : 'down'} text-${isPositive ? 'green' : 'red'}-500`}></i>
+                                                )}
+                                            </div>
+                                            
+                                            <h3 className="text-gray-800 font-bold text-lg mb-2">{item.name}</h3>
+                                            <p className="text-gray-500 text-sm mb-3">{item.symbol}</p>
+                                            
+                                            {quote ? (
+                                                <>
+                                                    <div className="text-2xl font-bold text-gray-900 mb-2">
+                                                        {formatPrice(quote.price, quote.currency)}
+                                                    </div>
+                                                    <div className={`flex items-center space-x-2 text-sm font-semibold ${isPositive ? 'text-green-600' : 'text-red-600'}`}>
+                                                        <span>{isPositive ? '+' : ''}{formatPrice(quote.change)}</span>
+                                                        <span>({isPositive ? '+' : ''}{formatPercent(quote.changePercent)}%)</span>
+                                                    </div>
+                                                </>
+                                            ) : (
+                                                <div className="text-gray-500">데이터 로딩 중...</div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
+                        {/* 푸터 */}
+                        <div className="mt-12 text-center text-gray-700 text-sm">
+                            <p className="font-medium">데이터 제공: Yahoo Finance API</p>
+                            <p className="mt-2">※ 일부 데이터는 15-20분 지연될 수 있습니다.</p>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.render(<PortfolioDashboard />, document.getElementById('root'));
+    </script>
+</body>
+</html>
