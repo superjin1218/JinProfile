@@ -108,7 +108,7 @@
                 { name: 'GitHub', url: 'https://github.com/superjin1218', icon: 'fa-github', customIcon: false, color: 'from-gray-700 to-gray-900' }
             ];
 
-            // 데이터 패치 함수
+            // === [수정된 fetchData 함수] ===
             const fetchData = async () => {
                 if (Object.keys(quotes).length === 0) {
                     setLoading(true); // 첫 로드 시에만 전체 로딩
@@ -119,8 +119,9 @@
                 
                 // 야후 파이낸스 API (비공식)
                 const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbolsString}`;
-                // CORS 우회 프록시
-                const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+                
+                // 다른 CORS 우회 프록시 (thingproxy.freeboard.io) 사용
+                const proxyUrl = `https://thingproxy.freeboard.io/fetch/${url}`;
 
                 try {
                     const response = await fetch(proxyUrl);
@@ -138,6 +139,8 @@
                         setQuotes(quotesMap);
                         setLastUpdate(new Date());
                     } else {
+                        // 프록시가 에러 JSON을 반환했거나, 야후 응답이 비어있을 경우
+                        console.error("Unexpected API response structure: ", data);
                         throw new Error('API 응답 형식이 올바르지 않습니다.');
                     }
                 } catch (error) {
@@ -147,6 +150,7 @@
                     setLoading(false);
                 }
             };
+            // =============================
 
             // 1분마다 데이터 갱신
             useEffect(() => {
