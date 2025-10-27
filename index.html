@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Finance 용가리</title>
+    <title>jinwoo Story</title>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -31,31 +31,70 @@
             { symbol: '^STOXX50E', name: '유로스탁스50', icon: '🇪🇺' }
         ];
 
-        // 개선된 Yahoo Finance API 호출
+        // Sleep 함수
+        const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+        // Retry 로직이 포함된 fetch
+        const fetchWithRetry = async (url, retries = 3, delay = 1000) => {
+            for (let i = 0; i < retries; i++) {
+                try {
+                    const response = await fetch(url, {
+                        method: 'GET',
+                        headers: {
+                            'Accept': 'application/json',
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                        }
+                    });
+                    
+                    if (response.ok) {
+                        return await response.json();
+                    }
+                    
+                    // 429 (Too Many Requests)나 5xx 에러는 재시도
+                    if (response.status === 429 || response.status >= 500) {
+                        console.warn(`Retry ${i + 1}/${retries} for ${url} (Status: ${response.status})`);
+                        if (i < retries - 1) {
+                            await sleep(delay * Math.pow(2, i)); // Exponential backoff
+                            continue;
+                        }
+                    }
+                    
+                    throw new Error(`HTTP ${response.status}`);
+                } catch (error) {
+                    if (i === retries - 1) throw error;
+                    console.warn(`Retry ${i + 1}/${retries} due to error:`, error.message);
+                    await sleep(delay * Math.pow(2, i));
+                }
+            }
+        };
+
+        // Yahoo Finance API 호출 (개선된 버전)
         const fetchQuote = async (symbol) => {
             try {
-                // Yahoo Finance v7 quote API 사용 (더 안정적)
+                // v7 quote API 사용
                 const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbol}`;
-                const response = await fetch(url, {
-                    headers: {
-                        'User-Agent': 'Mozilla/5.0'
-                    }
-                });
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                
-                const data = await response.json();
+                const data = await fetchWithRetry(url, 3, 500);
                 
                 if (data.quoteResponse && data.quoteResponse.result && data.quoteResponse.result[0]) {
                     const quote = data.quoteResponse.result[0];
                     
-                    // regularMarketPrice가 없으면 다른 필드 시도
-                    const currentPrice = quote.regularMarketPrice || quote.ask || quote.bid || quote.previousClose;
-                    const prevClose = quote.regularMarketPreviousClose || quote.previousClose;
+                    // 현재가 찾기 (여러 필드 시도)
+                    const currentPrice = quote.regularMarketPrice || 
+                                       quote.ask || 
+                                       quote.bid || 
+                                       quote.previousClose;
+                    
+                    const prevClose = quote.regularMarketPreviousClose || 
+                                    quote.previousClose;
+                    
+                    if (!currentPrice || !prevClose) {
+                        console.warn(`Missing price data for ${symbol}`);
+                        return null;
+                    }
+                    
                     const change = quote.regularMarketChange || (currentPrice - prevClose);
-                    const changePercent = quote.regularMarketChangePercent || ((currentPrice - prevClose) / prevClose * 100);
+                    const changePercent = quote.regularMarketChangePercent || 
+                                        ((currentPrice - prevClose) / prevClose * 100);
                     
                     return {
                         symbol: symbol,
@@ -65,14 +104,17 @@
                         changePercent: changePercent,
                         currency: quote.currency || 'USD',
                         marketState: quote.marketState || 'UNKNOWN',
-                        lastUpdate: quote.regularMarketTime ? new Date(quote.regularMarketTime * 1000) : new Date()
+                        lastUpdate: quote.regularMarketTime ? 
+                                  new Date(quote.regularMarketTime * 1000) : 
+                                  new Date(),
+                        success: true
                     };
                 }
                 
-                console.warn(`No data for ${symbol}`);
+                console.warn(`No data in response for ${symbol}`);
                 return null;
             } catch (error) {
-                console.error(`Error fetching ${symbol}:`, error);
+                console.error(`Error fetching ${symbol}:`, error.message);
                 return null;
             }
         };
@@ -81,6 +123,7 @@
             const [quotes, setQuotes] = useState({});
             const [loading, setLoading] = useState(true);
             const [lastUpdate, setLastUpdate] = useState(new Date());
+            const [loadingProgress, setLoadingProgress] = useState(0);
             const [errors, setErrors] = useState([]);
 
             // 링크 정보
@@ -115,44 +158,60 @@
                 }
             ];
 
+            // 순차적으로 데이터 가져오기 (rate limiting 방지)
             const fetchAllQuotes = async () => {
                 setLoading(true);
                 setErrors([]);
+                setLoadingProgress(0);
                 const newQuotes = {};
                 const errorList = [];
                 
-                // 병렬로 모든 데이터 가져오기 (더 빠름)
-                const promises = FINANCIAL_SYMBOLS.map(async (item) => {
+                console.log('Starting to fetch quotes...');
+                
+                // 순차 처리로 변경 (rate limiting 방지)
+                for (let i = 0; i < FINANCIAL_SYMBOLS.length; i++) {
+                    const item = FINANCIAL_SYMBOLS[i];
+                    
                     try {
+                        console.log(`Fetching ${item.symbol} (${i + 1}/${FINANCIAL_SYMBOLS.length})...`);
                         const quote = await fetchQuote(item.symbol);
+                        
                         if (quote) {
                             newQuotes[item.symbol] = quote;
+                            console.log(`✓ ${item.symbol}: ${quote.price}`);
                         } else {
                             errorList.push(`${item.name} 데이터 없음`);
+                            console.warn(`✗ ${item.symbol}: No data`);
                         }
+                        
+                        // 진행률 업데이트
+                        setLoadingProgress(Math.round((i + 1) / FINANCIAL_SYMBOLS.length * 100));
+                        setQuotes({...newQuotes}); // 중간 결과도 표시
+                        
+                        // API rate limiting 방지를 위한 딜레이 (중요!)
+                        if (i < FINANCIAL_SYMBOLS.length - 1) {
+                            await sleep(400); // 400ms 딜레이
+                        }
+                        
                     } catch (error) {
-                        errorList.push(`${item.name} 로딩 실패`);
+                        errorList.push(`${item.name} 로딩 실패: ${error.message}`);
+                        console.error(`✗ ${item.symbol}: ${error.message}`);
                     }
-                });
+                }
                 
-                await Promise.all(promises);
+                console.log(`Completed: ${Object.keys(newQuotes).length}/${FINANCIAL_SYMBOLS.length} successful`);
                 
                 setQuotes(newQuotes);
                 setErrors(errorList);
                 setLoading(false);
                 setLastUpdate(new Date());
-                
-                console.log('Loaded quotes:', Object.keys(newQuotes).length);
-                if (errorList.length > 0) {
-                    console.warn('Errors:', errorList);
-                }
             };
 
             useEffect(() => {
                 fetchAllQuotes();
                 
-                // 1분마다 자동 새로고침
-                const interval = setInterval(fetchAllQuotes, 60000);
+                // 2분마다 자동 새로고침
+                const interval = setInterval(fetchAllQuotes, 120000);
                 
                 return () => clearInterval(interval);
             }, []);
@@ -201,13 +260,46 @@
                         {/* 헤더 */}
                         <div className="text-center mb-12">
                             <h1 className="text-5xl font-bold text-gray-800 mb-4 drop-shadow-lg">
-                                Finance 용가리
+                                Jinwoo's Story
                             </h1>
                             <p className="text-gray-700 text-lg font-medium">실시간 글로벌 시장 데이터</p>
-                            {errors.length > 0 && (
-                                <div className="mt-4 bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-2 rounded-lg inline-block">
+                            
+                            {/* 로딩 프로그레스바 */}
+                            {loading && (
+                                <div className="mt-4 max-w-md mx-auto">
+                                    <div className="bg-white rounded-full h-3 overflow-hidden shadow-inner">
+                                        <div 
+                                            className="bg-blue-600 h-full transition-all duration-300 ease-out"
+                                            style={{width: `${loadingProgress}%`}}
+                                        ></div>
+                                    </div>
+                                    <p className="text-sm text-gray-600 mt-2">
+                                        데이터 로딩 중... {loadingProgress}%
+                                    </p>
+                                </div>
+                            )}
+                            
+                            {/* 에러 메시지 */}
+                            {errors.length > 0 && !loading && (
+                                <div className="mt-4 bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded-lg inline-block">
                                     <i className="fas fa-exclamation-triangle mr-2"></i>
                                     일부 데이터 로딩 실패 ({errors.length}개)
+                                    <details className="mt-2 text-xs text-left">
+                                        <summary className="cursor-pointer">자세히 보기</summary>
+                                        <ul className="mt-2 list-disc list-inside">
+                                            {errors.map((err, idx) => (
+                                                <li key={idx}>{err}</li>
+                                            ))}
+                                        </ul>
+                                    </details>
+                                </div>
+                            )}
+                            
+                            {/* 성공 메시지 */}
+                            {!loading && errors.length === 0 && Object.keys(quotes).length > 0 && (
+                                <div className="mt-4 bg-green-100 border border-green-400 text-green-700 px-4 py-2 rounded-lg inline-block">
+                                    <i className="fas fa-check-circle mr-2"></i>
+                                    모든 데이터 로딩 완료!
                                 </div>
                             )}
                         </div>
@@ -262,7 +354,7 @@
                                         className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2 shadow-lg"
                                     >
                                         <i className={`fas fa-sync-alt ${loading ? 'animate-spin' : ''}`}></i>
-                                        <span>{loading ? '로딩 중...' : '새로고침'}</span>
+                                        <span>{loading ? `로딩 중... ${loadingProgress}%` : '새로고침'}</span>
                                     </button>
                                 </div>
                             </div>
@@ -312,7 +404,7 @@
                                             ) : loading ? (
                                                 <div className="text-gray-500 flex items-center">
                                                     <i className="fas fa-spinner fa-spin mr-2"></i>
-                                                    데이터 로딩 중...
+                                                    대기 중...
                                                 </div>
                                             ) : (
                                                 <div className="text-red-500 text-sm">
@@ -332,6 +424,9 @@
                             <p className="mt-2">※ 실시간 데이터는 시장 상황에 따라 지연될 수 있습니다.</p>
                             <p className="mt-1 text-xs text-gray-600">
                                 브라우저 콘솔(F12)을 열어 자세한 로딩 정보를 확인할 수 있습니다.
+                            </p>
+                            <p className="mt-2 text-xs text-gray-500">
+                                데이터는 순차적으로 로딩되어 약 {(FINANCIAL_SYMBOLS.length * 0.4).toFixed(0)}초가 소요됩니다.
                             </p>
                         </div>
                     </div>
