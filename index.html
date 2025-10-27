@@ -1,440 +1,466 @@
-<!DOCTYPE html>
-<html lang="ko">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>jinwoo Story</title>
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-</head>
-<body class="bg-gradient-to-br from-sky-400 via-blue-300 to-cyan-400 min-h-screen">
-    <div id="root"></div>
+"""
+실시간 가격 데이터 수집 시스템
+- 주식, 암호화폐, 환율 실시간 가격 지원
+- 에러 처리 및 재시도 로직 포함
+- 웹소켓 및 REST API 지원
+"""
 
-    <script type="text/babel">
-        const { useState, useEffect } = React;
+import asyncio
+import aiohttp
+import json
+import time
+from datetime import datetime
+from typing import Dict, List, Optional, Any, Callable
+from enum import Enum
+import logging
+from dataclasses import dataclass
+from collections import deque
+import threading
 
-        // 금융 상품 설정
-        const FINANCIAL_SYMBOLS = [
-            { symbol: 'BTC-USD', name: '비트코인', icon: '₿' },
-            { symbol: '^IXIC', name: '나스닥', icon: '📊' },
-            { symbol: '^GSPC', name: 'S&P 500', icon: '📈' },
-            { symbol: '^N225', name: '니케이225', icon: '🗾' },
-            { symbol: '^HSI', name: '항셍지수', icon: '🇭🇰' },
-            { symbol: '^KS11', name: '코스피', icon: '🇰🇷' },
-            { symbol: '^KQ11', name: '코스닥', icon: '📱' },
-            { symbol: 'GC=F', name: '금', icon: '🥇' },
-            { symbol: 'CL=F', name: 'WTI 원유', icon: '🛢️' },
-            { symbol: 'NG=F', name: '천연가스', icon: '🔥' },
-            { symbol: '^STOXX50E', name: '유로스탁스50', icon: '🇪🇺' }
-        ];
+# 로깅 설정
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
-        // Sleep 함수
-        const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-        // Retry 로직이 포함된 fetch
-        const fetchWithRetry = async (url, retries = 3, delay = 1000) => {
-            for (let i = 0; i < retries; i++) {
-                try {
-                    const response = await fetch(url, {
-                        method: 'GET',
-                        headers: {
-                            'Accept': 'application/json',
-                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                        }
-                    });
-                    
-                    if (response.ok) {
-                        return await response.json();
-                    }
-                    
-                    // 429 (Too Many Requests)나 5xx 에러는 재시도
-                    if (response.status === 429 || response.status >= 500) {
-                        console.warn(`Retry ${i + 1}/${retries} for ${url} (Status: ${response.status})`);
-                        if (i < retries - 1) {
-                            await sleep(delay * Math.pow(2, i)); // Exponential backoff
-                            continue;
-                        }
-                    }
-                    
-                    throw new Error(`HTTP ${response.status}`);
-                } catch (error) {
-                    if (i === retries - 1) throw error;
-                    console.warn(`Retry ${i + 1}/${retries} due to error:`, error.message);
-                    await sleep(delay * Math.pow(2, i));
-                }
-            }
-        };
+class AssetType(Enum):
+    """지원하는 자산 타입"""
+    STOCK = "stock"
+    CRYPTO = "crypto"
+    FOREX = "forex"
+    COMMODITY = "commodity"
 
-        // Yahoo Finance API 호출 (개선된 버전)
-        const fetchQuote = async (symbol) => {
-            try {
-                // v7 quote API 사용
-                const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbol}`;
-                const data = await fetchWithRetry(url, 3, 500);
-                
-                if (data.quoteResponse && data.quoteResponse.result && data.quoteResponse.result[0]) {
-                    const quote = data.quoteResponse.result[0];
-                    
-                    // 현재가 찾기 (여러 필드 시도)
-                    const currentPrice = quote.regularMarketPrice || 
-                                       quote.ask || 
-                                       quote.bid || 
-                                       quote.previousClose;
-                    
-                    const prevClose = quote.regularMarketPreviousClose || 
-                                    quote.previousClose;
-                    
-                    if (!currentPrice || !prevClose) {
-                        console.warn(`Missing price data for ${symbol}`);
-                        return null;
-                    }
-                    
-                    const change = quote.regularMarketChange || (currentPrice - prevClose);
-                    const changePercent = quote.regularMarketChangePercent || 
-                                        ((currentPrice - prevClose) / prevClose * 100);
-                    
-                    return {
-                        symbol: symbol,
-                        price: currentPrice,
-                        previousClose: prevClose,
-                        change: change,
-                        changePercent: changePercent,
-                        currency: quote.currency || 'USD',
-                        marketState: quote.marketState || 'UNKNOWN',
-                        lastUpdate: quote.regularMarketTime ? 
-                                  new Date(quote.regularMarketTime * 1000) : 
-                                  new Date(),
-                        success: true
-                    };
-                }
-                
-                console.warn(`No data in response for ${symbol}`);
-                return null;
-            } catch (error) {
-                console.error(`Error fetching ${symbol}:`, error.message);
-                return null;
-            }
-        };
 
-        function PortfolioDashboard() {
-            const [quotes, setQuotes] = useState({});
-            const [loading, setLoading] = useState(true);
-            const [lastUpdate, setLastUpdate] = useState(new Date());
-            const [loadingProgress, setLoadingProgress] = useState(0);
-            const [errors, setErrors] = useState([]);
-
-            // 링크 정보
-            const links = [
-                {
-                    name: '티스토리 블로그',
-                    url: 'https://hanglestocks.tistory.com',
-                    icon: 'fa-t',
-                    customIcon: true,
-                    color: 'from-orange-500 to-red-500'
-                },
-                {
-                    name: 'Threads',
-                    url: 'https://www.threads.com/@sgfindreamer?hl=ko',
-                    icon: 'fa-at',
-                    customIcon: false,
-                    color: 'from-purple-500 to-pink-500'
-                },
-                {
-                    name: 'LinkedIn',
-                    url: 'https://www.linkedin.com/in/heyjinwoo',
-                    icon: 'fa-linkedin',
-                    customIcon: false,
-                    color: 'from-blue-600 to-blue-700'
-                },
-                {
-                    name: 'GitHub',
-                    url: 'https://github.com/superjin1218',
-                    icon: 'fa-github',
-                    customIcon: false,
-                    color: 'from-gray-700 to-gray-900'
-                }
-            ];
-
-            // 순차적으로 데이터 가져오기 (rate limiting 방지)
-            const fetchAllQuotes = async () => {
-                setLoading(true);
-                setErrors([]);
-                setLoadingProgress(0);
-                const newQuotes = {};
-                const errorList = [];
-                
-                console.log('Starting to fetch quotes...');
-                
-                // 순차 처리로 변경 (rate limiting 방지)
-                for (let i = 0; i < FINANCIAL_SYMBOLS.length; i++) {
-                    const item = FINANCIAL_SYMBOLS[i];
-                    
-                    try {
-                        console.log(`Fetching ${item.symbol} (${i + 1}/${FINANCIAL_SYMBOLS.length})...`);
-                        const quote = await fetchQuote(item.symbol);
-                        
-                        if (quote) {
-                            newQuotes[item.symbol] = quote;
-                            console.log(`✓ ${item.symbol}: ${quote.price}`);
-                        } else {
-                            errorList.push(`${item.name} 데이터 없음`);
-                            console.warn(`✗ ${item.symbol}: No data`);
-                        }
-                        
-                        // 진행률 업데이트
-                        setLoadingProgress(Math.round((i + 1) / FINANCIAL_SYMBOLS.length * 100));
-                        setQuotes({...newQuotes}); // 중간 결과도 표시
-                        
-                        // API rate limiting 방지를 위한 딜레이 (중요!)
-                        if (i < FINANCIAL_SYMBOLS.length - 1) {
-                            await sleep(400); // 400ms 딜레이
-                        }
-                        
-                    } catch (error) {
-                        errorList.push(`${item.name} 로딩 실패: ${error.message}`);
-                        console.error(`✗ ${item.symbol}: ${error.message}`);
-                    }
-                }
-                
-                console.log(`Completed: ${Object.keys(newQuotes).length}/${FINANCIAL_SYMBOLS.length} successful`);
-                
-                setQuotes(newQuotes);
-                setErrors(errorList);
-                setLoading(false);
-                setLastUpdate(new Date());
-            };
-
-            useEffect(() => {
-                fetchAllQuotes();
-                
-                // 2분마다 자동 새로고침
-                const interval = setInterval(fetchAllQuotes, 120000);
-                
-                return () => clearInterval(interval);
-            }, []);
-
-            const formatPrice = (price, currency) => {
-                if (price === null || price === undefined) return 'N/A';
-                
-                // 통화별 소수점 자리수 조정
-                let decimals = 2;
-                if (price > 10000) decimals = 0;
-                else if (price > 1000) decimals = 1;
-                else if (price < 1) decimals = 4;
-                
-                return new Intl.NumberFormat('ko-KR', {
-                    minimumFractionDigits: decimals,
-                    maximumFractionDigits: decimals
-                }).format(price);
-            };
-
-            const formatPercent = (percent) => {
-                if (percent === null || percent === undefined) return 'N/A';
-                return percent.toFixed(2);
-            };
-
-            const getMarketStateText = (state) => {
-                const states = {
-                    'REGULAR': '정규장',
-                    'PRE': '프리마켓',
-                    'POST': '애프터마켓',
-                    'CLOSED': '휴장',
-                    'PREPRE': '개장 전',
-                    'POSTPOST': '종료'
-                };
-                return states[state] || state;
-            };
-
-            const getMarketStateColor = (state) => {
-                if (state === 'REGULAR') return 'text-green-600';
-                if (state === 'CLOSED') return 'text-gray-500';
-                return 'text-yellow-600';
-            };
-
-            return (
-                <div className="min-h-screen p-4 md:p-8">
-                    <div className="max-w-7xl mx-auto">
-                        {/* 헤더 */}
-                        <div className="text-center mb-12">
-                            <h1 className="text-5xl font-bold text-gray-800 mb-4 drop-shadow-lg">
-                                Jinwoo's Story
-                            </h1>
-                            <p className="text-gray-700 text-lg font-medium">실시간 글로벌 시장 데이터</p>
-                            
-                            {/* 로딩 프로그레스바 */}
-                            {loading && (
-                                <div className="mt-4 max-w-md mx-auto">
-                                    <div className="bg-white rounded-full h-3 overflow-hidden shadow-inner">
-                                        <div 
-                                            className="bg-blue-600 h-full transition-all duration-300 ease-out"
-                                            style={{width: `${loadingProgress}%`}}
-                                        ></div>
-                                    </div>
-                                    <p className="text-sm text-gray-600 mt-2">
-                                        데이터 로딩 중... {loadingProgress}%
-                                    </p>
-                                </div>
-                            )}
-                            
-                            {/* 에러 메시지 */}
-                            {errors.length > 0 && !loading && (
-                                <div className="mt-4 bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded-lg inline-block">
-                                    <i className="fas fa-exclamation-triangle mr-2"></i>
-                                    일부 데이터 로딩 실패 ({errors.length}개)
-                                    <details className="mt-2 text-xs text-left">
-                                        <summary className="cursor-pointer">자세히 보기</summary>
-                                        <ul className="mt-2 list-disc list-inside">
-                                            {errors.map((err, idx) => (
-                                                <li key={idx}>{err}</li>
-                                            ))}
-                                        </ul>
-                                    </details>
-                                </div>
-                            )}
-                            
-                            {/* 성공 메시지 */}
-                            {!loading && errors.length === 0 && Object.keys(quotes).length > 0 && (
-                                <div className="mt-4 bg-green-100 border border-green-400 text-green-700 px-4 py-2 rounded-lg inline-block">
-                                    <i className="fas fa-check-circle mr-2"></i>
-                                    모든 데이터 로딩 완료!
-                                </div>
-                            )}
-                        </div>
-
-                        {/* 소셜 링크 섹션 */}
-                        <div className="mb-12">
-                            <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center">
-                                <i className="fas fa-link mr-3"></i>
-                                내 링크
-                            </h2>
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                                {links.map((link, index) => (
-                                    <a
-                                        key={index}
-                                        href={link.url}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className={`bg-gradient-to-br ${link.color} p-6 rounded-xl shadow-lg hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-1`}
-                                    >
-                                        <div className="flex items-center space-x-4">
-                                            {link.customIcon ? (
-                                                <div className="text-3xl text-white font-black" style={{fontFamily: 'Arial, sans-serif'}}>
-                                                    tistory
-                                                </div>
-                                            ) : (
-                                                <i className={`fab ${link.icon} text-3xl text-white`}></i>
-                                            )}
-                                            <div>
-                                                <h3 className="text-white font-bold text-lg">{link.name}</h3>
-                                                <p className="text-white text-sm opacity-80">방문하기</p>
-                                            </div>
-                                        </div>
-                                    </a>
-                                ))}
-                            </div>
-                        </div>
-
-                        {/* 실시간 금융 데이터 섹션 */}
-                        <div className="mb-12">
-                            <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 space-y-4 md:space-y-0">
-                                <h2 className="text-2xl font-bold text-gray-800 flex items-center">
-                                    <i className="fas fa-chart-line mr-3"></i>
-                                    실시간 시장 데이터
-                                </h2>
-                                <div className="flex flex-col md:flex-row items-start md:items-center space-y-2 md:space-y-0 md:space-x-4">
-                                    <span className="text-gray-700 text-sm font-medium">
-                                        마지막 업데이트: {lastUpdate.toLocaleTimeString('ko-KR')}
-                                    </span>
-                                    <button
-                                        onClick={fetchAllQuotes}
-                                        disabled={loading}
-                                        className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2 shadow-lg"
-                                    >
-                                        <i className={`fas fa-sync-alt ${loading ? 'animate-spin' : ''}`}></i>
-                                        <span>{loading ? `로딩 중... ${loadingProgress}%` : '새로고침'}</span>
-                                    </button>
-                                </div>
-                            </div>
-
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                                {FINANCIAL_SYMBOLS.map((item) => {
-                                    const quote = quotes[item.symbol];
-                                    const isPositive = quote?.change >= 0;
-
-                                    return (
-                                        <div
-                                            key={item.symbol}
-                                            className="bg-white rounded-xl p-6 shadow-xl hover:shadow-2xl transition-all duration-300 border border-gray-200"
-                                        >
-                                            <div className="flex items-center justify-between mb-4">
-                                                <span className="text-3xl">{item.icon}</span>
-                                                <div className="flex items-center space-x-2">
-                                                    {quote?.marketState && (
-                                                        <span className={`text-xs font-semibold ${getMarketStateColor(quote.marketState)}`}>
-                                                            {getMarketStateText(quote.marketState)}
-                                                        </span>
-                                                    )}
-                                                    {loading && !quote ? (
-                                                        <i className="fas fa-spinner fa-spin text-gray-400"></i>
-                                                    ) : quote ? (
-                                                        <i className={`fas fa-arrow-${isPositive ? 'up' : 'down'} text-${isPositive ? 'green' : 'red'}-500`}></i>
-                                                    ) : (
-                                                        <i className="fas fa-exclamation-circle text-red-500"></i>
-                                                    )}
-                                                </div>
-                                            </div>
-                                            
-                                            <h3 className="text-gray-800 font-bold text-lg mb-2">{item.name}</h3>
-                                            <p className="text-gray-500 text-sm mb-3">{item.symbol}</p>
-                                            
-                                            {quote ? (
-                                                <>
-                                                    <div className="text-2xl font-bold text-gray-900 mb-2">
-                                                        {formatPrice(quote.price, quote.currency)}
-                                                        <span className="text-sm text-gray-500 ml-2">{quote.currency}</span>
-                                                    </div>
-                                                    <div className={`flex items-center space-x-2 text-sm font-semibold ${isPositive ? 'text-green-600' : 'text-red-600'}`}>
-                                                        <span>{isPositive ? '+' : ''}{formatPrice(quote.change)}</span>
-                                                        <span>({isPositive ? '+' : ''}{formatPercent(quote.changePercent)}%)</span>
-                                                    </div>
-                                                </>
-                                            ) : loading ? (
-                                                <div className="text-gray-500 flex items-center">
-                                                    <i className="fas fa-spinner fa-spin mr-2"></i>
-                                                    대기 중...
-                                                </div>
-                                            ) : (
-                                                <div className="text-red-500 text-sm">
-                                                    <i className="fas fa-exclamation-triangle mr-1"></i>
-                                                    데이터 없음
-                                                </div>
-                                            )}
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        </div>
-
-                        {/* 푸터 */}
-                        <div className="mt-12 text-center text-gray-700 text-sm">
-                            <p className="font-medium">데이터 제공: Yahoo Finance API</p>
-                            <p className="mt-2">※ 실시간 데이터는 시장 상황에 따라 지연될 수 있습니다.</p>
-                            <p className="mt-1 text-xs text-gray-600">
-                                브라우저 콘솔(F12)을 열어 자세한 로딩 정보를 확인할 수 있습니다.
-                            </p>
-                            <p className="mt-2 text-xs text-gray-500">
-                                데이터는 순차적으로 로딩되어 약 {(FINANCIAL_SYMBOLS.length * 0.4).toFixed(0)}초가 소요됩니다.
-                            </p>
-                        </div>
-                    </div>
-                </div>
-            );
+@dataclass
+class PriceData:
+    """가격 데이터 구조체"""
+    symbol: str
+    price: float
+    timestamp: datetime
+    volume: Optional[float] = None
+    bid: Optional[float] = None
+    ask: Optional[float] = None
+    change_24h: Optional[float] = None
+    change_percent_24h: Optional[float] = None
+    high_24h: Optional[float] = None
+    low_24h: Optional[float] = None
+    market_cap: Optional[float] = None
+    
+    def to_dict(self) -> Dict:
+        """딕셔너리로 변환"""
+        return {
+            'symbol': self.symbol,
+            'price': self.price,
+            'timestamp': self.timestamp.isoformat(),
+            'volume': self.volume,
+            'bid': self.bid,
+            'ask': self.ask,
+            'change_24h': self.change_24h,
+            'change_percent_24h': self.change_percent_24h,
+            'high_24h': self.high_24h,
+            'low_24h': self.low_24h,
+            'market_cap': self.market_cap
         }
 
-        ReactDOM.render(<PortfolioDashboard />, document.getElementById('root'));
-    </script>
-</body>
-</html>
+
+class PriceDataSource:
+    """가격 데이터 소스 기본 클래스"""
+    
+    def __init__(self, api_key: Optional[str] = None):
+        self.api_key = api_key
+        self.session: Optional[aiohttp.ClientSession] = None
+        self.is_connected = False
+        
+    async def connect(self):
+        """연결 초기화"""
+        if not self.session:
+            self.session = aiohttp.ClientSession()
+        self.is_connected = True
+        logger.info(f"{self.__class__.__name__} connected")
+        
+    async def disconnect(self):
+        """연결 종료"""
+        if self.session:
+            await self.session.close()
+        self.is_connected = False
+        logger.info(f"{self.__class__.__name__} disconnected")
+        
+    async def get_price(self, symbol: str) -> Optional[PriceData]:
+        """가격 데이터 가져오기 (구현 필요)"""
+        raise NotImplementedError
+        
+    async def get_multiple_prices(self, symbols: List[str]) -> Dict[str, PriceData]:
+        """여러 심볼의 가격 데이터 가져오기"""
+        results = {}
+        tasks = [self.get_price(symbol) for symbol in symbols]
+        prices = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        for symbol, price in zip(symbols, prices):
+            if not isinstance(price, Exception) and price:
+                results[symbol] = price
+            else:
+                logger.error(f"Failed to get price for {symbol}: {price}")
+                
+        return results
+
+
+class CryptoDataSource(PriceDataSource):
+    """암호화폐 가격 데이터 소스 (Binance API)"""
+    
+    BASE_URL = "https://api.binance.com/api/v3"
+    
+    async def get_price(self, symbol: str) -> Optional[PriceData]:
+        """Binance에서 암호화폐 가격 가져오기"""
+        try:
+            # 24시간 티커 정보
+            url = f"{self.BASE_URL}/ticker/24hr"
+            params = {'symbol': symbol.upper()}
+            
+            async with self.session.get(url, params=params) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    
+                    return PriceData(
+                        symbol=symbol,
+                        price=float(data['lastPrice']),
+                        timestamp=datetime.now(),
+                        volume=float(data['volume']),
+                        bid=float(data['bidPrice']),
+                        ask=float(data['askPrice']),
+                        change_24h=float(data['priceChange']),
+                        change_percent_24h=float(data['priceChangePercent']),
+                        high_24h=float(data['highPrice']),
+                        low_24h=float(data['lowPrice'])
+                    )
+                else:
+                    logger.error(f"Failed to fetch {symbol}: HTTP {response.status}")
+                    return None
+                    
+        except Exception as e:
+            logger.error(f"Error fetching crypto price for {symbol}: {e}")
+            return None
+
+
+class ForexDataSource(PriceDataSource):
+    """외환 가격 데이터 소스 (Exchange Rates API)"""
+    
+    BASE_URL = "https://api.exchangerate-api.com/v4/latest"
+    
+    async def get_price(self, symbol: str) -> Optional[PriceData]:
+        """환율 가져오기 (예: USD/EUR)"""
+        try:
+            if '/' in symbol:
+                base, target = symbol.upper().split('/')
+            else:
+                logger.error(f"Invalid forex symbol format: {symbol}")
+                return None
+                
+            url = f"{self.BASE_URL}/{base}"
+            
+            async with self.session.get(url) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    
+                    if target in data['rates']:
+                        return PriceData(
+                            symbol=symbol,
+                            price=data['rates'][target],
+                            timestamp=datetime.now()
+                        )
+                    else:
+                        logger.error(f"Target currency {target} not found")
+                        return None
+                else:
+                    logger.error(f"Failed to fetch {symbol}: HTTP {response.status}")
+                    return None
+                    
+        except Exception as e:
+            logger.error(f"Error fetching forex rate for {symbol}: {e}")
+            return None
+
+
+class StockDataSource(PriceDataSource):
+    """주식 가격 데이터 소스 (Yahoo Finance - yfinance 대체)"""
+    
+    BASE_URL = "https://query1.finance.yahoo.com/v8/finance/chart"
+    
+    async def get_price(self, symbol: str) -> Optional[PriceData]:
+        """Yahoo Finance에서 주식 가격 가져오기"""
+        try:
+            url = f"{self.BASE_URL}/{symbol.upper()}"
+            
+            async with self.session.get(url) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    result = data['chart']['result'][0]
+                    meta = result['meta']
+                    
+                    return PriceData(
+                        symbol=symbol,
+                        price=meta['regularMarketPrice'],
+                        timestamp=datetime.fromtimestamp(meta['regularMarketTime']),
+                        volume=meta.get('regularMarketVolume'),
+                        high_24h=meta.get('regularMarketDayHigh'),
+                        low_24h=meta.get('regularMarketDayLow'),
+                        change_24h=meta['regularMarketPrice'] - meta['previousClose'],
+                        change_percent_24h=((meta['regularMarketPrice'] - meta['previousClose']) / meta['previousClose']) * 100
+                    )
+                else:
+                    logger.error(f"Failed to fetch {symbol}: HTTP {response.status}")
+                    return None
+                    
+        except Exception as e:
+            logger.error(f"Error fetching stock price for {symbol}: {e}")
+            return None
+
+
+class RealtimePriceFetcher:
+    """실시간 가격 데이터 수집기 메인 클래스"""
+    
+    def __init__(self):
+        self.sources: Dict[AssetType, PriceDataSource] = {}
+        self.price_cache: Dict[str, deque] = {}  # 가격 히스토리 저장
+        self.cache_size = 100  # 각 심볼당 저장할 가격 데이터 수
+        self.callbacks: Dict[str, List[Callable]] = {}  # 가격 업데이트 콜백
+        self.is_running = False
+        self.update_intervals: Dict[str, float] = {}  # 심볼별 업데이트 주기
+        
+    def register_source(self, asset_type: AssetType, source: PriceDataSource):
+        """데이터 소스 등록"""
+        self.sources[asset_type] = source
+        logger.info(f"Registered {asset_type.value} data source")
+        
+    async def initialize(self):
+        """모든 데이터 소스 초기화"""
+        for asset_type, source in self.sources.items():
+            await source.connect()
+            
+    async def shutdown(self):
+        """모든 데이터 소스 종료"""
+        self.is_running = False
+        for source in self.sources.values():
+            await source.disconnect()
+            
+    def add_callback(self, symbol: str, callback: Callable):
+        """가격 업데이트 콜백 등록"""
+        if symbol not in self.callbacks:
+            self.callbacks[symbol] = []
+        self.callbacks[symbol].append(callback)
+        
+    async def _notify_callbacks(self, symbol: str, price_data: PriceData):
+        """등록된 콜백 실행"""
+        if symbol in self.callbacks:
+            for callback in self.callbacks[symbol]:
+                try:
+                    if asyncio.iscoroutinefunction(callback):
+                        await callback(price_data)
+                    else:
+                        callback(price_data)
+                except Exception as e:
+                    logger.error(f"Error in callback for {symbol}: {e}")
+                    
+    def _update_cache(self, symbol: str, price_data: PriceData):
+        """가격 캐시 업데이트"""
+        if symbol not in self.price_cache:
+            self.price_cache[symbol] = deque(maxlen=self.cache_size)
+        self.price_cache[symbol].append(price_data)
+        
+    def get_latest_price(self, symbol: str) -> Optional[PriceData]:
+        """최신 가격 데이터 가져오기"""
+        if symbol in self.price_cache and self.price_cache[symbol]:
+            return self.price_cache[symbol][-1]
+        return None
+        
+    def get_price_history(self, symbol: str, limit: int = 50) -> List[PriceData]:
+        """가격 히스토리 가져오기"""
+        if symbol in self.price_cache:
+            return list(self.price_cache[symbol])[-limit:]
+        return []
+        
+    async def fetch_price(self, symbol: str, asset_type: AssetType) -> Optional[PriceData]:
+        """단일 가격 데이터 가져오기"""
+        if asset_type not in self.sources:
+            logger.error(f"No source registered for {asset_type.value}")
+            return None
+            
+        source = self.sources[asset_type]
+        price_data = await source.get_price(symbol)
+        
+        if price_data:
+            self._update_cache(symbol, price_data)
+            await self._notify_callbacks(symbol, price_data)
+            
+        return price_data
+        
+    async def start_monitoring(self, symbols: Dict[AssetType, List[str]], 
+                              update_interval: float = 5.0):
+        """실시간 모니터링 시작"""
+        self.is_running = True
+        
+        logger.info(f"Starting real-time monitoring with {update_interval}s interval")
+        
+        while self.is_running:
+            tasks = []
+            
+            for asset_type, symbol_list in symbols.items():
+                if asset_type in self.sources:
+                    for symbol in symbol_list:
+                        # 심볼별 업데이트 주기 확인
+                        interval = self.update_intervals.get(symbol, update_interval)
+                        
+                        # 마지막 업데이트 시간 확인
+                        latest = self.get_latest_price(symbol)
+                        if latest:
+                            time_diff = (datetime.now() - latest.timestamp).total_seconds()
+                            if time_diff < interval:
+                                continue
+                                
+                        tasks.append(self.fetch_price(symbol, asset_type))
+                        
+            if tasks:
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                
+                # 에러 로깅
+                for result in results:
+                    if isinstance(result, Exception):
+                        logger.error(f"Error during monitoring: {result}")
+                        
+            await asyncio.sleep(1)  # 짧은 대기 시간
+            
+    def set_update_interval(self, symbol: str, interval: float):
+        """특정 심볼의 업데이트 주기 설정"""
+        self.update_intervals[symbol] = interval
+        
+    async def get_multiple_prices_async(self, symbols_map: Dict[AssetType, List[str]]) -> Dict[str, PriceData]:
+        """여러 심볼의 가격을 비동기로 가져오기"""
+        all_results = {}
+        
+        for asset_type, symbols in symbols_map.items():
+            if asset_type in self.sources:
+                source = self.sources[asset_type]
+                results = await source.get_multiple_prices(symbols)
+                all_results.update(results)
+                
+        return all_results
+
+
+class PriceAlertSystem:
+    """가격 알림 시스템"""
+    
+    def __init__(self, fetcher: RealtimePriceFetcher):
+        self.fetcher = fetcher
+        self.alerts: List[Dict] = []
+        
+    def add_price_alert(self, symbol: str, target_price: float, 
+                        condition: str = 'above', callback: Optional[Callable] = None):
+        """가격 알림 추가"""
+        alert = {
+            'symbol': symbol,
+            'target_price': target_price,
+            'condition': condition,  # 'above', 'below', 'equals'
+            'callback': callback,
+            'triggered': False,
+            'created_at': datetime.now()
+        }
+        self.alerts.append(alert)
+        
+        # 가격 체크 콜백 등록
+        self.fetcher.add_callback(symbol, lambda price: self._check_alert(alert, price))
+        
+    async def _check_alert(self, alert: Dict, price_data: PriceData):
+        """알림 조건 체크"""
+        if alert['triggered']:
+            return
+            
+        triggered = False
+        current_price = price_data.price
+        
+        if alert['condition'] == 'above' and current_price > alert['target_price']:
+            triggered = True
+        elif alert['condition'] == 'below' and current_price < alert['target_price']:
+            triggered = True
+        elif alert['condition'] == 'equals' and abs(current_price - alert['target_price']) < 0.01:
+            triggered = True
+            
+        if triggered:
+            alert['triggered'] = True
+            logger.info(f"Price alert triggered for {alert['symbol']}: {current_price} {alert['condition']} {alert['target_price']}")
+            
+            if alert['callback']:
+                if asyncio.iscoroutinefunction(alert['callback']):
+                    await alert['callback'](alert, price_data)
+                else:
+                    alert['callback'](alert, price_data)
+
+
+# 사용 예제
+async def main_example():
+    """실시간 가격 데이터 수집 예제"""
+    
+    # 가격 수집기 초기화
+    fetcher = RealtimePriceFetcher()
+    
+    # 데이터 소스 등록
+    fetcher.register_source(AssetType.CRYPTO, CryptoDataSource())
+    fetcher.register_source(AssetType.FOREX, ForexDataSource())
+    fetcher.register_source(AssetType.STOCK, StockDataSource())
+    
+    # 초기화
+    await fetcher.initialize()
+    
+    # 가격 업데이트 콜백 예제
+    def price_update_callback(price_data: PriceData):
+        print(f"[UPDATE] {price_data.symbol}: ${price_data.price:.2f} at {price_data.timestamp}")
+    
+    # 콜백 등록
+    fetcher.add_callback("BTCUSDT", price_update_callback)
+    fetcher.add_callback("AAPL", price_update_callback)
+    
+    # 알림 시스템 설정
+    alert_system = PriceAlertSystem(fetcher)
+    
+    def alert_callback(alert, price_data):
+        print(f"[ALERT] {alert['symbol']} reached {alert['target_price']}! Current: ${price_data.price:.2f}")
+    
+    # 가격 알림 추가
+    alert_system.add_price_alert("BTCUSDT", 50000, "above", alert_callback)
+    alert_system.add_price_alert("AAPL", 150, "below", alert_callback)
+    
+    # 모니터링할 심볼 설정
+    symbols_to_monitor = {
+        AssetType.CRYPTO: ["BTCUSDT", "ETHUSDT"],
+        AssetType.STOCK: ["AAPL", "GOOGL"],
+        AssetType.FOREX: ["USD/EUR", "USD/KRW"]
+    }
+    
+    # 특정 심볼의 업데이트 주기 설정 (빠른 업데이트)
+    fetcher.set_update_interval("BTCUSDT", 2.0)  # 2초마다
+    
+    try:
+        # 실시간 모니터링 시작 (백그라운드)
+        monitor_task = asyncio.create_task(
+            fetcher.start_monitoring(symbols_to_monitor, update_interval=5.0)
+        )
+        
+        # 10초 동안 실행
+        await asyncio.sleep(10)
+        
+        # 가격 히스토리 출력
+        print("\n=== Price History ===")
+        for symbol in ["BTCUSDT", "AAPL"]:
+            history = fetcher.get_price_history(symbol, limit=5)
+            if history:
+                print(f"\n{symbol}:")
+                for price_data in history:
+                    print(f"  ${price_data.price:.2f} at {price_data.timestamp}")
+        
+    finally:
+        # 종료
+        await fetcher.shutdown()
+
+
+if __name__ == "__main__":
+    # 실행
+    asyncio.run(main_example())
