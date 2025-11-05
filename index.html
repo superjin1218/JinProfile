@@ -28,7 +28,8 @@
                 { name: '티스토리 블로그', url: 'https://hanglestocks.tistory.com', icon: 'fa-t', customIcon: true, color: 'from-orange-500 to-red-500' },
                 { name: 'Threads', url: 'https://www.threads.com/@sgfindreamer?hl=ko', icon: 'fa-at', customIcon: false, color: 'from-purple-500 to-pink-500' },
                 { name: 'LinkedIn', url: 'https://www.linkedin.com/in/heyjinwoo', icon: 'fa-linkedin', customIcon: false, color: 'from-blue-600 to-blue-700' },
-                { name: 'GitHub', url: 'https://github.com/superjin1218', icon: 'fa-github', customIcon: false, color: 'from-gray-700 to-gray-900' }
+                { name: 'GitHub', url: 'https://github.com/superjin1218', icon: 'fa-github', customIcon: false, color: 'from-gray-700 to-gray-900' },
+                { name: '인하대주식톡방', url: 'https://open.kakao.com/o/gCDc4BHg', icon: 'fa-comment', customIcon: false, color: 'from-yellow-400 to-yellow-500' }
             ];
 
             return (
@@ -70,8 +71,105 @@
                             ))}
                         </div>
                     </div>
-                    
-                    {/* --- 3. 금융 대시보드 섹션 (제거됨) --- */}
+
+                    {/* --- 3. 경력 및 수상 섹션 --- */}
+                    <div className="mb-12">
+                        <h2 className="text-3xl font-bold text-gray-800 mb-6 flex items-center">
+                            <i className="fas fa-trophy mr-3"></i>
+                            경력 및 수상
+                        </h2>
+                        <div className="bg-white/90 backdrop-blur-sm rounded-xl shadow-lg p-8">
+                            <div className="space-y-6">
+                                {/* 2022년 */}
+                                <div className="border-l-4 border-orange-500 pl-6">
+                                    <h3 className="text-xl font-bold text-gray-800 mb-2">2022</h3>
+                                    <ul className="space-y-2 text-gray-700">
+                                        <li className="flex items-start">
+                                            <i className="fas fa-circle text-orange-500 text-xs mt-2 mr-3"></i>
+                                            <span>jo식이야기 티스토리 개설 (누적 조회수 3만회 돌파)</span>
+                                        </li>
+                                    </ul>
+                                </div>
+
+                                {/* 2023년 */}
+                                <div className="border-l-4 border-blue-500 pl-6">
+                                    <h3 className="text-xl font-bold text-gray-800 mb-2">2023</h3>
+                                    <ul className="space-y-2 text-gray-700">
+                                        <li className="flex items-start">
+                                            <i className="fas fa-circle text-blue-500 text-xs mt-2 mr-3"></i>
+                                            <span>상명대-인하대 AWS 대회 Top 6</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <i className="fas fa-circle text-blue-500 text-xs mt-2 mr-3"></i>
+                                            <span>CFA 리서치 챌린지 완주</span>
+                                        </li>
+                                    </ul>
+                                </div>
+
+                                {/* 2024년 */}
+                                <div className="border-l-4 border-purple-500 pl-6">
+                                    <h3 className="text-xl font-bold text-gray-800 mb-2">2024</h3>
+                                    <ul className="space-y-2 text-gray-700">
+                                        <li className="flex items-start">
+                                            <i className="fas fa-circle text-purple-500 text-xs mt-2 mr-3"></i>
+                                            <span>그로스톤 아이디어톤 최우수상</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <i className="fas fa-circle text-purple-500 text-xs mt-2 mr-3"></i>
+                                            <span>아그톤 우수상</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <i className="fas fa-circle text-purple-500 text-xs mt-2 mr-3"></i>
+                                            <span>DB 갭스투자대회 본선 진출</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <i className="fas fa-circle text-purple-500 text-xs mt-2 mr-3"></i>
+                                            <span>StockTalk Inha 오픈채팅방 개설 (현 580명)</span>
+                                        </li>
+                                    </ul>
+                                </div>
+
+                                {/* 2025년 */}
+                                <div className="border-l-4 border-green-500 pl-6">
+                                    <h3 className="text-xl font-bold text-gray-800 mb-2">2025</h3>
+                                    <ul className="space-y-2 text-gray-700">
+                                        <li className="flex items-start">
+                                            <i className="fas fa-circle text-green-500 text-xs mt-2 mr-3"></i>
+                                            <span>인천연합주식동아리 I.T.T 임원 (3월~현재)</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <i className="fas fa-circle text-green-500 text-xs mt-2 mr-3"></i>
+                                            <span>금융하는 용가리 쓰레드 운영 시작 (현재)</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <i className="fas fa-circle text-green-500 text-xs mt-2 mr-3"></i>
+                                            <span>무역보험 빅데이터 분석과제 공모전 대상</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <i className="fas fa-circle text-green-500 text-xs mt-2 mr-3"></i>
+                                            <span>한국디지털컨텐츠학회 하계학술대회 은상</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <i className="fas fa-circle text-green-500 text-xs mt-2 mr-3"></i>
+                                            <span>투자자산운용사 자격 취득</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <i className="fas fa-circle text-green-500 text-xs mt-2 mr-3"></i>
+                                            <span>어드벤텍코리아 AIoT 대회 본선 진출</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <i className="fas fa-circle text-green-500 text-xs mt-2 mr-3"></i>
+                                            <span>인하대 뮤추얼펀드 블루칩 사원 (7월~현재)</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <i className="fas fa-circle text-green-500 text-xs mt-2 mr-3"></i>
+                                            <span>한국투자증권 대학생 투자대회 팀전 4등</span>
+                                        </li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                     
                 </div>
             );
