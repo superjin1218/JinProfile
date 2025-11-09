@@ -14,6 +14,173 @@
         .shadow-text {
             text-shadow: 0 2px 4px rgba(0,0,0,0.3);
         }
+
+        /* 금융 정보 티커 스타일 */
+        .finance-ticker {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            padding: 12px 0;
+            margin-bottom: 20px;
+            overflow: hidden;
+            position: relative;
+            border-radius: 12px;
+        }
+
+        /* 티커 상단 정보 바 */
+        .ticker-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 16px 8px;
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        .ticker-title {
+            font-weight: 600;
+        }
+
+        .ticker-update {
+            font-size: 10px;
+        }
+
+        /* 티커 컨테이너 */
+        .ticker-container {
+            position: relative;
+            height: 40px;
+            overflow: hidden;
+        }
+
+        /* 티커 콘텐츠 - 애니메이션을 위한 래퍼 */
+        .ticker-content {
+            display: flex;
+            position: absolute;
+            animation: scroll-left 60s linear infinite;
+        }
+
+        /* 마우스 호버시 애니메이션 일시정지 */
+        .ticker-container:hover .ticker-content {
+            animation-play-state: paused;
+        }
+
+        /* 좌우 그라데이션 효과 */
+        .ticker-container::before,
+        .ticker-container::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 30px;
+            z-index: 1;
+            pointer-events: none;
+        }
+
+        .ticker-container::before {
+            left: 0;
+            background: linear-gradient(to right, #1e3c72, transparent);
+        }
+
+        .ticker-container::after {
+            right: 0;
+            background: linear-gradient(to left, #2a5298, transparent);
+        }
+
+        /* 개별 티커 아이템 */
+        .ticker-item {
+            display: flex;
+            align-items: center;
+            padding: 0 20px;
+            white-space: nowrap;
+            color: white;
+            min-width: max-content;
+        }
+
+        /* 티커 심볼(이름) */
+        .ticker-symbol {
+            font-size: 12px;
+            font-weight: 600;
+            margin-right: 8px;
+            color: rgba(255, 255, 255, 0.9);
+        }
+
+        /* 티커 가격 */
+        .ticker-price {
+            font-size: 14px;
+            font-weight: 700;
+            margin-right: 6px;
+        }
+
+        /* 티커 변동률 */
+        .ticker-change {
+            font-size: 12px;
+            font-weight: 500;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+
+        /* 상승시 초록색 */
+        .ticker-change.positive {
+            background: rgba(16, 185, 129, 0.2);
+            color: #10b981;
+        }
+
+        /* 하락시 빨간색 */
+        .ticker-change.negative {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+        }
+
+        /* 변동없음 회색 */
+        .ticker-change.neutral {
+            background: rgba(156, 163, 175, 0.2);
+            color: #9ca3af;
+        }
+
+        /* 로딩 스피너 */
+        .ticker-loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 40px;
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 13px;
+        }
+
+        .spinner {
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top: 2px solid white;
+            border-radius: 50%;
+            width: 16px;
+            height: 16px;
+            animation: spin 1s linear infinite;
+            margin-right: 8px;
+        }
+
+        /* 스피너 회전 애니메이션 */
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* 스크롤 애니메이션 */
+        @keyframes scroll-left {
+            0% {
+                transform: translateX(0);
+            }
+            100% {
+                transform: translateX(-50%);
+            }
+        }
+
+        /* 에러 메시지 */
+        .ticker-error {
+            padding: 12px 16px;
+            color: #fbbf24;
+            font-size: 12px;
+            text-align: center;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+            margin: 8px 16px;
+        }
     </style>
 </head>
 <body class="bg-gradient-to-br from-sky-400 via-blue-300 to-cyan-400 min-h-screen">
@@ -22,6 +189,10 @@
     <script type="text/babel">
         // 1. 메인 대시보드 컴포넌트
         function PortfolioDashboard() {
+            // 금융 티커 상태 관리
+            const [tickerData, setTickerData] = React.useState([]);
+            const [isLoading, setIsLoading] = React.useState(true);
+            const [updateTime, setUpdateTime] = React.useState('업데이트 중...');
             
             // 링크 정보 (사용자 코드)
             const links = [
@@ -32,6 +203,106 @@
                 { name: '인하대주식톡방', url: 'https://open.kakao.com/o/gCDc4BHg', icon: 'kakao', customIcon: true, color: 'from-yellow-400 to-yellow-500' }
             ];
 
+            // 표시할 금융 상품 목록
+            const FINANCIAL_SYMBOLS = {
+                '^GSPC': 'S&P 500',
+                '^DJI': '다우존스',
+                '^IXIC': '나스닥',
+                '^HSI': '항셍',
+                '^STOXX50E': '유로스톡스50',
+                '^FTSE': 'FTSE 100',
+                '^N225': '니케이',
+                '^KS11': '코스피',
+                '^KQ11': '코스닥',
+                'GC=F': '금',
+                'CL=F': '원유',
+                '^TNX': '미 10년물'
+            };
+
+            // 금융 데이터 가져오기
+            const fetchStockData = async (symbol) => {
+                try {
+                    const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(
+                        `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}`
+                    )}`;
+                    
+                    const response = await fetch(proxyUrl);
+                    const data = await response.json();
+                    const yahooData = JSON.parse(data.contents);
+                    
+                    if (yahooData.chart && yahooData.chart.result && yahooData.chart.result[0]) {
+                        const result = yahooData.chart.result[0];
+                        const quote = result.meta;
+                        
+                        const currentPrice = quote.regularMarketPrice || 0;
+                        const previousClose = quote.previousClose || quote.chartPreviousClose || 0;
+                        const change = currentPrice - previousClose;
+                        const changePercent = previousClose ? (change / previousClose * 100) : 0;
+                        
+                        return {
+                            symbol: symbol,
+                            name: FINANCIAL_SYMBOLS[symbol],
+                            price: currentPrice,
+                            change: change,
+                            changePercent: changePercent,
+                            currency: quote.currency || 'USD'
+                        };
+                    }
+                    
+                    throw new Error('Invalid data structure');
+                    
+                } catch (error) {
+                    console.error(`Error fetching ${symbol}:`, error);
+                    return null;
+                }
+            };
+
+            // 모든 금융 데이터 가져오기
+            const fetchAllFinancialData = async () => {
+                try {
+                    setIsLoading(true);
+                    const promises = Object.keys(FINANCIAL_SYMBOLS).map(symbol => 
+                        fetchStockData(symbol)
+                    );
+                    
+                    const results = await Promise.all(promises);
+                    const validData = results.filter(item => item !== null);
+                    
+                    setTickerData(validData);
+                    setIsLoading(false);
+                    
+                    // 업데이트 시간 표시
+                    const now = new Date();
+                    const hours = String(now.getHours()).padStart(2, '0');
+                    const minutes = String(now.getMinutes()).padStart(2, '0');
+                    setUpdateTime(`${hours}:${minutes} 업데이트`);
+                    
+                } catch (error) {
+                    console.error('Error fetching financial data:', error);
+                    setIsLoading(false);
+                }
+            };
+
+            // 컴포넌트 마운트시 데이터 가져오기 및 5분마다 업데이트
+            React.useEffect(() => {
+                fetchAllFinancialData();
+                const interval = setInterval(fetchAllFinancialData, 300000); // 5분
+                return () => clearInterval(interval);
+            }, []);
+
+            // 숫자 포맷팅
+            const formatNumber = (num, decimals = 2) => {
+                if (typeof num !== 'number' || isNaN(num)) return '0.00';
+                return num.toFixed(decimals).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+            };
+
+            // 변동률 클래스 결정
+            const getChangeClass = (change) => {
+                if (change > 0) return 'positive';
+                if (change < 0) return 'negative';
+                return 'neutral';
+            };
+
             return (
                 <div className="container mx-auto p-4 md:p-8 max-w-7xl">
                     {/* --- 1. 헤더 --- */}
@@ -39,7 +310,50 @@
                         Jinwoo's Story
                     </h1>
 
-                    {/* --- 2. 소셜 링크 섹션 --- */}
+                    {/* --- 2. 금융 정보 티커 --- */}
+                    <div className="mb-8">
+                        <div className="finance-ticker">
+                            <div className="ticker-info">
+                                <span className="ticker-title">📊 실시간 금융정보</span>
+                                <span className="ticker-update">{updateTime}</span>
+                            </div>
+                            <div className="ticker-container">
+                                {isLoading ? (
+                                    <div className="ticker-loading">
+                                        <div className="spinner"></div>
+                                        <span>데이터 로딩중...</span>
+                                    </div>
+                                ) : tickerData.length > 0 ? (
+                                    <div className="ticker-content">
+                                        {/* 무한 스크롤을 위해 2번 반복 */}
+                                        {[...tickerData, ...tickerData].map((item, index) => {
+                                            const changeClass = getChangeClass(item.change);
+                                            const changeSymbol = item.change > 0 ? '▲' : item.change < 0 ? '▼' : '－';
+                                            const priceDisplay = item.symbol === '^TNX' 
+                                                ? `${formatNumber(item.price, 3)}%`
+                                                : `${formatNumber(item.price)}`;
+                                            
+                                            return (
+                                                <div key={index} className="ticker-item">
+                                                    <span className="ticker-symbol">{item.name}</span>
+                                                    <span className="ticker-price">{priceDisplay}</span>
+                                                    <span className={`ticker-change ${changeClass}`}>
+                                                        {changeSymbol} {Math.abs(item.changePercent).toFixed(2)}%
+                                                    </span>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                ) : (
+                                    <div className="ticker-error">
+                                        ⚠️ 현재 금융 데이터를 불러올 수 없습니다.
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* --- 3. 소셜 링크 섹션 --- */}
                     <div className="mb-12">
                         <h2 className="text-3xl font-bold text-gray-800 mb-6 flex items-center">
                             <i className="fas fa-link mr-3"></i>
@@ -132,9 +446,45 @@
                                             <i className="fas fa-circle text-purple-500 text-xs mt-2 mr-3"></i>
                                             <span>StockTalk Inha 오픈채팅방 개설 (현 580명)</span>
                                         </li>
+                                         <li className="flex items-start">
+                                            <i className="fas fa-circle text-purple-500 text-xs mt-2 mr-3"></i>
+                                            <span>인하대 코딩 동아리 "네터스"에서 C++교육 진행행</span>
+                                        </li>
+                                    </ul>
+                                </div>
+
+                                {/* 2025년 */}
+                                <div className="border-l-4 border-green-500 pl-6">
+                                    <h3 className="text-xl font-bold text-gray-800 mb-2">2025</h3>
+                                    <ul className="space-y-2 text-gray-700">
+                                        <li className="flex items-start">
+                                            <i className="fas fa-circle text-green-500 text-xs mt-2 mr-3"></i>
+                                            <span>인천연합주식동아리 I.T.T 임원 (3월~현재)</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <i className="fas fa-circle text-green-500 text-xs mt-2 mr-3"></i>
+                                            <span>금융하는 용가리 쓰레드 운영 시작 (현재)</span>
+                                        </li>
+                                         <li className="flex items-start">
+                                            <i className="fas fa-circle text-green-500 text-xs mt-2 mr-3"></i>
+                                            <span>삼성화재                                           <i className="fas fa-circle text-purple-500 text-xs mt-2 mr-3"></i>
+                                            <span>그로스톤 아이디어톤 최우수상</span>
+                                        </li>
                                         <li className="flex items-start">
                                             <i className="fas fa-circle text-purple-500 text-xs mt-2 mr-3"></i>
-                                            <span>인하대 주식동아리 네터스 C++ 기초교육 진행</span>
+                                            <span>아그톤 우수상</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <i className="fas fa-circle text-purple-500 text-xs mt-2 mr-3"></i>
+                                            <span>DB 갭스투자대회 본선 진출</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <i className="fas fa-circle text-purple-500 text-xs mt-2 mr-3"></i>
+                                            <span>StockTalk Inha 오픈채팅방 개설 (현 580명)</span>
+                                        </li>
+                                         <li className="flex items-start">
+                                            <i className="fas fa-circle text-purple-500 text-xs mt-2 mr-3"></i>
+                                            <span>인하대 코딩 동아리 "네터스"에서 C++교육 진행행</span>
                                         </li>
                                     </ul>
                                 </div>
@@ -153,11 +503,15 @@
                                         </li>
                                         <li className="flex items-start">
                                             <i className="fas fa-circle text-green-500 text-xs mt-2 mr-3"></i>
+                                            <span>삼성화재XPostechX서울대 제 3회 전국대학생리스크관리 경진대회 참가(역할: 머신러닝을 활용한 태풍 피해규모예측)</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <i className="fas fa-circle text-green-500 text-xs mt-2 mr-3"></i>
                                             <span>무역보험 빅데이터 분석과제 공모전 대상</span>
                                         </li>
                                         <li className="flex items-start">
                                             <i className="fas fa-circle text-green-500 text-xs mt-2 mr-3"></i>
-                                            <span>한국디지털컨텐츠학회 하계학술대회 은상(주제: Master를 활용한 시그모이드 함수의 주식시장 예측 유효성 검증)</span>
+                                            <span>한국디지털컨텐츠학회 하계학술대회 은상</span>
                                         </li>
                                         <li className="flex items-start">
                                             <i className="fas fa-circle text-green-500 text-xs mt-2 mr-3"></i>
@@ -174,18 +528,6 @@
                                         <li className="flex items-start">
                                             <i className="fas fa-circle text-green-500 text-xs mt-2 mr-3"></i>
                                             <span>한국투자증권 대학생 투자대회 팀전 4등</span>
-                                        </li>
-                                        <li className="flex items-start">
-                                            <i className="fas fa-circle text-green-500 text-xs mt-2 mr-3"></i>
-                                            <span>자동매매동아리 Project Auto 운영</span>
-                                        </li>
-                                        <li className="flex items-start">
-                                            <i className="fas fa-circle text-green-500 text-xs mt-2 mr-3"></i>
-                                            <span>1학기 블록체인 학회 Bluenode 회원</span>
-                                        </li>
-                                        <li className="flex items-start">
-                                            <i className="fas fa-circle text-green-500 text-xs mt-2 mr-3"></i>
-                                            <span>WorldQuant 본선 진출</span>
                                         </li>
                                     </ul>
                                 </div>
