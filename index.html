@@ -14,220 +14,13 @@
         .shadow-text {
             text-shadow: 0 2px 4px rgba(0,0,0,0.3);
         }
-
-        /* 티커 애니메이션 */
-        @keyframes scroll-left {
-            0% {
-                transform: translateX(0);
-            }
-            100% {
-                transform: translateX(-50%);
-            }
-        }
-
-        .ticker-scroll {
-            animation: scroll-left 60s linear infinite;
-        }
-
-        .ticker-container:hover .ticker-scroll {
-            animation-play-state: paused;
-        }
-
-        /* 스피너 애니메이션 */
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        .spinner {
-            animation: spin 1s linear infinite;
-        }
     </style>
 </head>
 <body class="bg-gradient-to-br from-sky-400 via-blue-300 to-cyan-400 min-h-screen">
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect } = React;
-
-        // 금융 티커 컴포넌트
-        function FinanceTicker() {
-            const [tickerData, setTickerData] = useState([]);
-            const [loading, setLoading] = useState(true);
-            const [error, setError] = useState(false);
-            const [updateTime, setUpdateTime] = useState('');
-
-            // 표시할 금융 상품 목록
-            const FINANCIAL_SYMBOLS = {
-                '^GSPC': 'S&P 500',
-                '^DJI': '다우존스',
-                '^IXIC': '나스닥',
-                '^KS11': '코스피',
-                '^KQ11': '코스닥',
-                '^HSI': '항셍',
-                '^N225': '니케이',
-                'GC=F': '금',
-                'CL=F': '원유',
-                '^TNX': '미 10년물',
-            };
-
-            // 개별 종목 데이터 가져오기
-            const fetchStockData = async (symbol) => {
-                try {
-                    const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(
-                        `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}`
-                    )}`;
-                    
-                    const response = await fetch(proxyUrl);
-                    const data = await response.json();
-                    const yahooData = JSON.parse(data.contents);
-                    
-                    if (yahooData.chart && yahooData.chart.result && yahooData.chart.result[0]) {
-                        const result = yahooData.chart.result[0];
-                        const quote = result.meta;
-                        
-                        const currentPrice = quote.regularMarketPrice || 0;
-                        const previousClose = quote.previousClose || quote.chartPreviousClose || 0;
-                        const change = currentPrice - previousClose;
-                        const changePercent = previousClose ? (change / previousClose * 100) : 0;
-                        
-                        return {
-                            symbol: symbol,
-                            name: FINANCIAL_SYMBOLS[symbol],
-                            price: currentPrice,
-                            change: change,
-                            changePercent: changePercent,
-                            currency: quote.currency || 'USD'
-                        };
-                    }
-                    
-                    throw new Error('Invalid data structure');
-                    
-                } catch (error) {
-                    console.error(`Error fetching ${symbol}:`, error);
-                    return null;
-                }
-            };
-
-            // 모든 금융 데이터 가져오기
-            const fetchAllFinancialData = async () => {
-                try {
-                    setLoading(true);
-                    const promises = Object.keys(FINANCIAL_SYMBOLS).map(symbol => 
-                        fetchStockData(symbol)
-                    );
-                    
-                    const results = await Promise.all(promises);
-                    const validData = results.filter(item => item !== null);
-                    
-                    if (validData.length > 0) {
-                        setTickerData(validData);
-                        setError(false);
-                        updateTimeDisplay();
-                    } else {
-                        setError(true);
-                    }
-                } catch (error) {
-                    console.error('Error fetching financial data:', error);
-                    setError(true);
-                } finally {
-                    setLoading(false);
-                }
-            };
-
-            // 시간 업데이트
-            const updateTimeDisplay = () => {
-                const now = new Date();
-                const hours = String(now.getHours()).padStart(2, '0');
-                const minutes = String(now.getMinutes()).padStart(2, '0');
-                setUpdateTime(`${hours}:${minutes}`);
-            };
-
-            // 숫자 포맷팅
-            const formatNumber = (num, decimals = 2) => {
-                if (typeof num !== 'number' || isNaN(num)) return '0.00';
-                return num.toFixed(decimals).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-            };
-
-            // 변동 클래스 결정
-            const getChangeClass = (change) => {
-                if (change > 0) return 'bg-green-500/20 text-green-300';
-                if (change < 0) return 'bg-red-500/20 text-red-300';
-                return 'bg-gray-500/20 text-gray-300';
-            };
-
-            const getChangeSymbol = (change) => {
-                if (change > 0) return '▲';
-                if (change < 0) return '▼';
-                return '－';
-            };
-
-            // 초기 로드 및 5분마다 업데이트
-            useEffect(() => {
-                fetchAllFinancialData();
-                const interval = setInterval(fetchAllFinancialData, 300000); // 5분
-                return () => clearInterval(interval);
-            }, []);
-
-            return (
-                <div className="mb-8 bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl shadow-lg overflow-hidden">
-                    {/* 상단 정보 바 */}
-                    <div className="flex justify-between items-center px-4 py-2 bg-black/20">
-                        <span className="text-white text-sm font-semibold">
-                            📊 실시간 금융정보
-                        </span>
-                        <span className="text-white/70 text-xs">
-                            {updateTime && `${updateTime} 업데이트`}
-                        </span>
-                    </div>
-
-                    {/* 티커 컨테이너 */}
-                    <div className="relative h-14 overflow-hidden ticker-container">
-                        {/* 좌우 그라데이션 */}
-                        <div className="absolute left-0 top-0 bottom-0 w-8 bg-gradient-to-r from-blue-600 to-transparent z-10 pointer-events-none"></div>
-                        <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-purple-600 to-transparent z-10 pointer-events-none"></div>
-
-                        {loading && (
-                            <div className="flex items-center justify-center h-full">
-                                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full spinner mr-2"></div>
-                                <span className="text-white/70 text-sm">데이터 로딩중...</span>
-                            </div>
-                        )}
-
-                        {error && !loading && (
-                            <div className="flex items-center justify-center h-full">
-                                <span className="text-yellow-300 text-sm">
-                                    ⚠️ 현재 금융 데이터를 불러올 수 없습니다.
-                                </span>
-                            </div>
-                        )}
-
-                        {!loading && !error && tickerData.length > 0 && (
-                            <div className="flex absolute ticker-scroll">
-                                {/* 데이터 2번 반복 (무한 스크롤) */}
-                                {[...tickerData, ...tickerData].map((item, index) => (
-                                    <div key={index} className="flex items-center px-6 whitespace-nowrap">
-                                        <span className="text-white/90 text-sm font-semibold mr-2">
-                                            {item.name}
-                                        </span>
-                                        <span className="text-white text-base font-bold mr-2">
-                                            {item.symbol === '^TNX' 
-                                                ? `${formatNumber(item.price, 3)}%`
-                                                : formatNumber(item.price)}
-                                        </span>
-                                        <span className={`text-xs font-medium px-2 py-1 rounded ${getChangeClass(item.change)}`}>
-                                            {getChangeSymbol(item.change)} {Math.abs(item.changePercent).toFixed(2)}%
-                                        </span>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-                </div>
-            );
-        }
-
-        // 메인 대시보드 컴포넌트
+        // 1. 메인 대시보드 컴포넌트
         function PortfolioDashboard() {
             
             // 링크 정보 (사용자 코드)
@@ -246,9 +39,6 @@
                         Jinwoo's Story
                     </h1>
 
-                    {/* --- 금융 티커 추가 --- */}
-                    <FinanceTicker />
-
                     {/* --- 2. 소셜 링크 섹션 --- */}
                     <div className="mb-12">
                         <h2 className="text-3xl font-bold text-gray-800 mb-6 flex items-center">
@@ -257,7 +47,7 @@
                         </h2>
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                             {links.map((link, index) => (
-                                
+                                <a
                                     key={index}
                                     href={link.url}
                                     target="_blank"
@@ -344,7 +134,7 @@
                                         </li>
                                         <li className="flex items-start">
                                             <i className="fas fa-circle text-purple-500 text-xs mt-2 mr-3"></i>
-                                            <span>인하대 코딩딩동아리 네터스 C++ 기초교육 진행</span>
+                                            <span>인하대 주식동아리 네터스 C++ 기초교육 진행</span>
                                         </li>
                                     </ul>
                                 </div>
@@ -376,10 +166,6 @@
                                         <li className="flex items-start">
                                             <i className="fas fa-circle text-green-500 text-xs mt-2 mr-3"></i>
                                             <span>어드벤텍코리아 AIoT 대회 본선 진출</span>
-                                        </li>
-                                        <li className="flex items-start">
-                                            <i className="fas fa-circle text-green-500 text-xs mt-2 mr-3"></i>
-                                            <span>삼성화재XPostechX서울대 제 3회 전국대학생리스크관리 경진대회 참가(역할: 머신러닝을 활용한 태풍 피해규모예측)</span>
                                         </li>
                                         <li className="flex items-start">
                                             <i className="fas fa-circle text-green-500 text-xs mt-2 mr-3"></i>
